@@ -1,33 +1,61 @@
-# XBSX2
+<p align="center">
+  <img src="https://raw.githubusercontent.com/skitzellez/xbox-game-vault/main/GameVault/art/logo-banner.png" alt="Game Vault" width="640">
+</p>
+
+<h1 align="center">XBSX2 for Game Vault</h1>
 
 <p align="center">
-  <img src="bin/resources/icons/AppBanner.svg" alt="XBSX2 App Banner" width="840" />
+  <b>The XBSX2 PlayStation 2 emulator for Xbox Series X|S in Dev Mode, built to work hand in hand with
+  <a href="https://github.com/skitzellez/xbox-game-vault">Game Vault</a>.</b><br>
+  Any USB stick, your memory cards on it, and PS2 discs straight from the console's drive.
 </p>
 
 <p align="center">
-  <img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/XboxEmulationHub/XBSX2/.github/workflows/windows_build_matrix.yml?style=for-the-badge" />
-  <a href="https://discord.gg/WCmxvvxHqu">
-    <img alt="Discord Server" src="https://img.shields.io/discord/1007582798598647889?style=for-the-badge&amp;color=%235CA8FA&amp;label=Xbox%20Emulation%20Hub&amp;logo=discord&amp;logoColor=white" />
-  </a>
+  <a href="https://github.com/skitzellez/XBSX2-GameVault/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/skitzellez/XBSX2-GameVault?include_prereleases&label=release&color=107C10"></a>
+  <img alt="Platform: Xbox Dev Mode" src="https://img.shields.io/badge/platform-Xbox%20Dev%20Mode-107C10?logo=xbox&logoColor=white">
+  <img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue">
+  <a href="https://www.patreon.com/Skitzelles"><img alt="Patreon" src="https://img.shields.io/badge/Patreon-Skitzelles-F96854?logo=patreon&logoColor=white"></a>
 </p>
 
-XBSX2 is a fork of [PCSX2](https://github.com/PCSX2/), a free and open-source PlayStation 2 (PS2) emulator, adapted for UWP/Xbox environments.
+---
 
-It emulates PS2 hardware using a combination of MIPS CPU [interpreters](https://en.wikipedia.org/wiki/Interpreter_(computing)), [recompilers](https://en.wikipedia.org/wiki/Dynamic_recompilation), and a [virtual machine](https://en.wikipedia.org/wiki/Virtual_machine) that manages hardware state and system memory.
+> [!IMPORTANT]
+> This is an **unofficial build**. It is not made or supported by XboxEmulationHub or the PCSX2 project, so please
+> report problems with it **here**, not to them.
 
-## System Requirements
+> [!NOTE]
+> A PlayStation 2 BIOS is needed and is **not included**. Dump it from your own console and put it in the
+> `Game Vault\bios` folder on your USB stick.
 
-- Recommended: Xbox Series S or Xbox Series X
-- Supported with limited compatibility: Xbox One, Xbox One S, and Xbox One X
+## ✨ What's different from the original
 
-Please note that a BIOS dump from a legitimately-owned PS2 console is required to use the emulator. For more information, visit [this page](https://pcsx2.net/docs/setup/gather/#how-to-dump-your-ps2-bios)
+| | |
+|---|---|
+| 💽 **Any USB stick** | FAT32, exFAT or NTFS, exactly as it is. No formatting, no permission commands on a PC. |
+| 💾 **Memory cards on your stick** | Started from Game Vault, it keeps BIOS files, memory cards, save states and its log in the `Game Vault` folder on the stick, and moves over what it had on the console the first time. |
+| 📀 **Discs from the drive** | PlayStation 2 discs play straight from the Series X disc drive. |
+| 🤝 **Lives next to the original** | Its own name and link, so the original XBSX2 app and its settings are left alone. |
 
-## Building
+## 🚀 Getting started
 
-Compilation Guide: [Compiling XBSX2](https://wiki.sternserv.xyz/docs/development/compiling-xbsx2-guide)
+The easy way is the all-in-one setup from **[Game Vault](https://github.com/skitzellez/xbox-game-vault#installation)**.
+It installs this build, sets up the controller, and copies over your settings, BIOS files and memory cards from
+the original XBSX2 app.
 
-## Credits
+By hand: download the `.msixbundle` from [Releases](https://github.com/skitzellez/XBSX2-GameVault/releases),
+install it through the Xbox **Device Portal**, then in **Dev Home** set its **App type** to **Game**.
 
-- [PCSX2](https://github.com/PCSX2/pcsx2) - For the base PS2 emulation with great performance
-- [SirMangler](https://github.com/SirMangler) / [TheRhysWyrill](https://github.com/TheRhysWyrill) - For rewriting PCSX2 for UWP
-- [Rockso85](https://github.com/Rockso85) / [redhood1337](https://github.com/redhood1337) / [fffathur](https://github.com/fffathur) - For asset support
+## 🛠️ Source
+
+Everything is on the **`gamevault`** branch, on top of [XboxEmulationHub/XBSX2](https://github.com/XboxEmulationHub/XBSX2).
+The main changes: `pcsx2-uwp/src/UWPFileRedirect.cpp` (any USB stick), `pcsx2/CDVD/Windows/IOCtlSrcXbox.inl`
+(the disc drive) and `pcsx2-uwp/src/main.cpp` (the Game Vault folder and launch link). Build with `build_gv.bat`
+(Visual Studio 2022 Build Tools).
+
+## 📜 Credits and licence
+
+- **[PCSX2](https://pcsx2.net)** and its contributors: all the emulation is theirs.
+- **[XBSX2](https://github.com/XboxEmulationHub/XBSX2)** by SternXD / XboxEmulationHub, the Xbox build this is based on.
+- Changes for Game Vault by **[Skitzelles](https://github.com/skitzellez)**, written with an AI assistant (Claude).
+
+GPL-3.0, like PCSX2. XBSX2's own README: [README-XBSX2.md](README-XBSX2.md).
