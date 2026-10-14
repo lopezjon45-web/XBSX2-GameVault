@@ -166,6 +166,7 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\UWPKeyboard.cpp" />
     <ClCompile Include="src\UWPSound.cpp" />
+    <ClCompile Include="src\UWPFileRedirect.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

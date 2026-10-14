@@ -22,6 +22,7 @@
 #include "common/CrashHandler.h"
 #include "common/Error.h"
 #include "common/FileSystem.h"
+#include "common/Console.h"
 #include "common/Path.h"
 
 #include "pcsx2/CDVD/CDVDcommon.h"
@@ -785,6 +786,79 @@ void WinRTHost::IdleEventLoop()
 	}
 }
 
+// Game Vault keeps BIOS files, memory cards and states on the games USB drive, in "<drive>\Game Vault", and
+// sends that folder as "home" with every game. The first time, what XBSX2 had in its own storage is moved
+// there (a file already on the drive is left alone). A game started without "home" uses XBSX2's own folders
+// again, so a stick that is no longer plugged in is never looked for.
+static const char* const s_home_folders[][2] = {
+	{"Bios", "bios"}, {"MemoryCards", "memory cards"}, {"Savestates", "states"}};
+static const char* const s_own_folders[] = {"bios", "memcards", "sstates"};
+
+static void MoveFolderToHome(const std::string& from, const std::string& to)
+{
+	FileSystem::FindResultsArray files;
+	if (!FileSystem::FindFiles(from.c_str(), "*", FILESYSTEM_FIND_FILES | FILESYSTEM_FIND_RECURSIVE | FILESYSTEM_FIND_RELATIVE_PATHS, &files))
+		return;
+	for (const FILESYSTEM_FIND_DATA& fd : files)
+	{
+		const std::string src = Path::Combine(from, fd.FileName), dst = Path::Combine(to, fd.FileName);
+		if (FileSystem::FileExists(dst.c_str()))
+			continue;
+		FileSystem::CreateDirectoryPath(std::string(Path::GetDirectory(dst)).c_str(), true);
+		if (FileSystem::CopyFilePath(src.c_str(), dst.c_str(), false))
+		{
+			FileSystem::DeleteFilePath(src.c_str());
+			Console.WriteLn("Game Vault: moved %s to %s", src.c_str(), dst.c_str());
+		}
+		else
+		{
+			Console.Error("Game Vault: could not move %s to %s", src.c_str(), dst.c_str());
+		}
+	}
+}
+
+static void UseGameVaultHome(const std::string& home, bool fps)
+{
+	{
+		auto lock = Host::GetSettingsLock();
+		SettingsInterface* si = Host::Internal::GetBaseSettingsLayer();
+		// The frame-rate display: Game Vault sends "fps=1" while it is on. Turned off again
+		// only when Game Vault turned it on, so a choice made in XBSX2's own settings is left alone.
+		const bool ours = si->GetBoolValue("GameVault", "FpsOn", false);
+		if (fps || ours)
+		{
+			si->SetBoolValue("EmuCore/GS", "OsdShowFPS", fps);
+			si->SetBoolValue("GameVault", "FpsOn", fps);
+		}
+		for (size_t i = 0; i < std::size(s_home_folders); i++)
+		{
+			const std::string current = si->GetStringValue("Folders", s_home_folders[i][0], s_own_folders[i]);
+			if (home.empty())
+			{
+				if (current.find("\\Game Vault\\") != std::string::npos)
+					si->SetStringValue("Folders", s_home_folders[i][0], s_own_folders[i]);
+				continue;
+			}
+			const std::string want = Path::Combine(home, s_home_folders[i][1]);
+			FileSystem::CreateDirectoryPath(want.c_str(), true);
+			// only XBSX2's own storage is emptied, never another drive's Game Vault folder
+			const std::string own = Path::IsAbsolute(current) ? current : Path::Combine(EmuFolders::DataRoot, current);
+			if (_strnicmp(own.c_str(), EmuFolders::DataRoot.c_str(), EmuFolders::DataRoot.size()) == 0)
+				MoveFolderToHome(own, want);
+			si->SetStringValue("Folders", s_home_folders[i][0], want.c_str());
+		}
+	}
+	Host::CommitBaseSettingChanges();
+	VMManager::Internal::UpdateEmuFolders();
+	// the log of each session goes to the drive too, where a player can pick it up for a problem report
+	if (!home.empty())
+	{
+		const std::string logs = Path::Combine(home, "logs");
+		FileSystem::CreateDirectoryPath(logs.c_str(), true);
+		Log::SetFileOutputLevel(LOGLEVEL_INFO, Path::Combine(logs, "PS2 (XBSX2) - last session.txt"));
+	}
+}
+
 struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 {
 	std::thread m_cpu_thread;
@@ -834,6 +908,8 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 		const winrt::Windows::ApplicationModel::Activation::IActivatedEventArgs& args)
 	{
 		std::stringstream filePath;
+		std::string home;
+		bool fps = false;
 
 		if (args.Kind() == Windows::ApplicationModel::Activation::ActivationKind::Protocol)
 		{
@@ -865,6 +941,15 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 						filePath << s;
 					}
 				}
+				else if (arg.Name() == winrt::hstring(L"home"))
+				{
+					// Game Vault's folder on the games drive (see UseGameVaultHome)
+					home = winrt::to_string(arg.Value());
+				}
+				else if (arg.Name() == winrt::hstring(L"fps"))
+				{
+					fps = arg.Value() == L"1";
+				}
 				else if (arg.Name() == winrt::hstring(L"launchOnExit"))
 				{
 					// For if we want to return to a frontend
@@ -876,10 +961,17 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 		std::string gamePath = filePath.str();
 		if (!gamePath.empty() && gamePath != "")
 		{
-			WinRTHost::QueueCPUEvent([gamePath]() {
+			WinRTHost::QueueCPUEvent([gamePath, home, fps]() {
+				if (VMManager::HasValidVM())
+				{
+					return;
+				}
+				UseGameVaultHome(home, fps);
+
 				VMBootParameters params{};
 				params.filename = gamePath;
-				params.source_type = CDVD_SourceType::Iso;
+				// "disc:" instead of a file: play the disc in the console's own drive
+				params.source_type = gamePath.rfind("disc:", 0) == 0 ? CDVD_SourceType::Disc : CDVD_SourceType::Iso;
 
 				if (VMManager::HasValidVM())
 				{
@@ -1162,8 +1254,12 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 	}
 };
 
+extern "C" void uwp_redirect_file_apis_startup(void);
+
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
+	// disc images on any USB drive (FAT32 / exFAT too): file calls go through the broker (UWPFileRedirect.cpp)
+	uwp_redirect_file_apis_startup();
 	SDL_SetMainReady();
 
 	winrt::init_apartment();
