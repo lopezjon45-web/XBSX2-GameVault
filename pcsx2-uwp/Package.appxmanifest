@@ -8,7 +8,7 @@
 	<Identity
 	  Name="GamerDad.XBSX2ForGameVault"
 	  Publisher="CN=GamerDad"
-	  Version="2.0.9.6" />
+	  Version="2.0.9.7" />
 
 	<Properties>
 		<DisplayName>XBSX2 for Game Vault</DisplayName>
@@ -68,5 +68,14 @@
 		<DeviceCapability Name="optical" />
 		<DeviceCapability Name="53f56308-b6bf-11d0-94f2-00a0c91efb8b" />
 	</Capabilities>
+
+	<Extensions>
+		<!-- the folder all of this publisher's apps share: a copy of the settings that outlives a reinstall -->
+		<Extension Category="windows.publisherCacheFolders">
+			<PublisherCacheFolders>
+				<Folder Name="games" />
+			</PublisherCacheFolders>
+		</Extension>
+	</Extensions>
 
 </Package>

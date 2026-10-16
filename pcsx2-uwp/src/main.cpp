@@ -11,6 +11,7 @@
 #include <winrt/Windows.Globalization.h>
 #include <winrt/Windows.Graphics.Display.Core.h>
 #include <winrt/Windows.Graphics.Display.h>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Core.h>
 #include <winrt/Windows.UI.Input.h>
@@ -203,6 +204,35 @@ static bool s_save_state_on_shutdown = false;
 BEGIN_HOTKEY_LIST(g_host_hotkeys)
 END_HOTKEY_LIST()
 
+// Game Vault: a copy of XBSX2's settings outside the app's own storage. The console deletes an app's storage when
+// the app is removed (a player's update through the Device Portal was queued, failed and took the app with it:
+// settings and controller setup gone), so the settings are kept in the publisher's shared folder
+// (games\xbsx2\PCSX2.ini: outlives a reinstall) and on the games drive (<home>\settings\XBSX2 PCSX2.ini: outlives a
+// reset console), and put back by themselves when XBSX2 starts with no settings of its own.
+static bool s_settings_were_fresh = false;
+
+static std::string GameVaultSettingsBackup()
+{
+	try
+	{
+		const std::string dir = winrt::to_string(winrt::Windows::Storage::ApplicationData::Current()
+				.GetPublisherCacheFolder(L"games").Path()) + "\\xbsx2";
+		FileSystem::CreateDirectoryPath(dir.c_str(), true);
+		return Path::Combine(dir, "PCSX2.ini");
+	}
+	catch (...)
+	{
+		return {};
+	}
+}
+
+static std::string GameVaultHomeSettings(const std::string& home)
+{
+	const std::string dir = Path::Combine(home, "settings");
+	FileSystem::CreateDirectoryPath(dir.c_str(), true);
+	return Path::Combine(dir, "XBSX2 PCSX2.ini");
+}
+
 bool WinRTHost::InitializeConfig()
 {
 	Error error;
@@ -252,7 +282,21 @@ bool WinRTHost::InitializeConfig()
 	}
 
 	std::string path(Path::Combine(EmuFolders::Settings, "PCSX2.ini"));
-	const bool settings_exists = FileSystem::FileExists(path.c_str());
+	bool settings_exists = FileSystem::FileExists(path.c_str());
+	if (!settings_exists)
+	{
+		// a reinstall: the copy in the shared folder, if there is one
+		const std::string backup = GameVaultSettingsBackup();
+		if (!backup.empty() && FileSystem::FileExists(backup.c_str()) && FileSystem::CopyFilePath(backup.c_str(), path.c_str(), true))
+		{
+			settings_exists = true;
+			Console.WriteLn("Game Vault: settings put back from %s", backup.c_str());
+		}
+		else
+		{
+			s_settings_were_fresh = true;
+		}
+	}
 	Console.WriteLn("Loading config from %s.", path.c_str());
 	s_settings_interface = std::make_unique<INISettingsInterface>(std::move(path));
 	Host::Internal::SetBaseSettingsLayer(s_settings_interface.get());
@@ -819,6 +863,19 @@ static void MoveFolderToHome(const std::string& from, const std::string& to)
 
 static void UseGameVaultHome(const std::string& home, bool fps)
 {
+	// fresh settings and no copy in the shared folder (a reset console): the copy on the games drive
+	if (s_settings_were_fresh && !home.empty())
+	{
+		s_settings_were_fresh = false;
+		const std::string from = GameVaultHomeSettings(home);
+		if (FileSystem::FileExists(from.c_str()) && s_settings_interface &&
+			FileSystem::CopyFilePath(from.c_str(), s_settings_interface->GetFileName().c_str(), true))
+		{
+			auto lock = Host::GetSettingsLock();
+			s_settings_interface->Load();
+			Console.WriteLn("Game Vault: settings put back from %s", from.c_str());
+		}
+	}
 	{
 		auto lock = Host::GetSettingsLock();
 		SettingsInterface* si = Host::Internal::GetBaseSettingsLayer();
@@ -850,6 +907,16 @@ static void UseGameVaultHome(const std::string& home, bool fps)
 	}
 	Host::CommitBaseSettingChanges();
 	VMManager::Internal::UpdateEmuFolders();
+	// keep the copies up to date: every start from Game Vault saves the settings as they are now
+	if (s_settings_interface)
+	{
+		const std::string& own = s_settings_interface->GetFileName();
+		const std::string backup = GameVaultSettingsBackup();
+		if (!backup.empty())
+			FileSystem::CopyFilePath(own.c_str(), backup.c_str(), true);
+		if (!home.empty())
+			FileSystem::CopyFilePath(own.c_str(), GameVaultHomeSettings(home).c_str(), true);
+	}
 	// the log of each session goes to the drive too, where a player can pick it up for a problem report
 	if (!home.empty())
 	{
