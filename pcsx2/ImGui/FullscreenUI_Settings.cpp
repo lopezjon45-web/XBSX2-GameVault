@@ -1751,8 +1751,13 @@ void FullscreenUI::SwitchToGameSettings()
 	if (!entry)
 		entry = GameList::GetEntryBySerialAndCRC(s_current_disc_serial.c_str(), s_current_disc_crc);
 
+	// Game Vault: a game started from Game Vault is often not in XBSX2's own game list (its folder is not one of
+	// XBSX2's search folders), and then "Game Properties" in the pause menu did nothing. The game's settings
+	// file only needs the serial and CRC, so open it from those - the same file the home screen edits.
 	if (entry)
 		SwitchToGameSettings(entry);
+	else
+		SwitchToGameSettings(s_current_disc_serial, s_current_disc_crc);
 }
 
 void FullscreenUI::SwitchToGameSettings(const std::string& path)
