@@ -5,15 +5,16 @@
 # stops the app at the first BMI2 or AVX2 instruction with STATUS_ILLEGAL_INSTRUCTION. This job builds the
 # same tree in the solution's "Release" configuration, PCSX2's SSE4.1 baseline, the one XboxEmulationHub ships
 # as XBSX2_<ver>_SSE4.msixbundle. The package keeps the identity Game Vault looks for and gets a version above
-# the AVX2 release so it installs over it. Nothing in the emulator's source changes.
+# the AVX2 release so it installs over it: 2.0.10.<run number> unless a dispatch names one, so every build of
+# this workflow installs as an update over the one before it.
 name: one-s
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Package version. Must be above the AVX2 release it replaces.
-        default: 2.0.9.113
+        description: Package version. Empty means 2.0.10.<run number>. Must be above the AVX2 release it replaces.
+        default: ''
   push:
     branches: [one-s]
 
@@ -22,7 +23,7 @@ permissions:
 
 env:
   START_COMMIT: dc47f7b34f7be0ca994deedf430bc55d4e467694 # skitzellez/XBSX2-GameVault branch gamevault, where this branch starts
-  PKG_VERSION: ${{ inputs.version || '2.0.9.113' }}
+  PKG_VERSION: ${{ inputs.version || format('2.0.10.{0}', github.run_number) }}
   PATCHES_URL: https://github.com/PCSX2/pcsx2_patches/releases/latest/download
   POWERSHELL_TELEMETRY_OPTOUT: 1
 
