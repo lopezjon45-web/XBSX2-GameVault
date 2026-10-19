@@ -120,7 +120,26 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force report | Out-Null
-          python .github/one-s/isa-gate.py --tool dumpbin --verbose bin\pcsx2-uwpx64.exe 2>&1 | Tee-Object -FilePath report\gate.txt
+          # Functions whose AVX2 instructions were seen, in run 39315254305's symbolized disassembly, to run only
+          # behind a CPU-feature check that a Jaguar fails (__isa_available reaches 5 only with CPUID.7:EBX.AVX2).
+          $allow = @(
+            # Each: the compiler's own AVX2 copy of a small shift loop, entered after cmp __isa_available,5 / jl to the scalar loop.
+            '--allow', '^Decompress16x3bitIndices$'
+            '--allow', '^lzma_codec_init$'
+            '--allow', '^cdlz_codec_init$'
+            '--allow', '^\?\?\$define_inner@V\?\$unordered_map@V\?\$basic_string@D'
+            # AVX2 loop runs only when _Avx2WmemEnabled is nonzero; it is zero-initialized and nothing in the exe writes it.
+            '--allow', '^wmemcmp$'
+            # MSVC STL vector algorithms: AVX2 block entered only after test __isa_enabled,20h (the AVX2 bit), else SSE4.2 or scalar.
+            '--allow', '^.anonymous namespace.::__std_find_trivial_impl<.anonymous namespace.::_Find_traits_(1,unsigned char|4,unsigned int)>$'
+            '--allow', '^.anonymous namespace.::__std_find_last_trivial_impl<.anonymous namespace.::_Find_traits_(1,unsigned char|2,unsigned short)>$'
+            '--allow', '^.anonymous namespace.::__std_mismatch_impl<.anonymous namespace.::_Find_traits_1,unsigned char>$'
+            '--allow', '^.anonymous namespace.::__std_minmax_disp<1,.anonymous namespace.::_Minmax_traits_4,0>$'
+            # Picks the AVX2 bitmap strategy (and calls _Make_bitmap) only when the __isa_enabled AVX2 bit is set.
+            '--allow', '^.anonymous namespace.::__std_find_first_of::_Dispatch_pos_sse_1_2<unsigned char>$'
+            '--allow', '^.anonymous namespace.::__std_find_meow_of_bitmap_details::_Make_bitmap<unsigned char>$'
+          )
+          python .github/one-s/isa-gate.py --tool dumpbin --verbose @allow bin\pcsx2-uwpx64.exe 2>&1 | Tee-Object -FilePath report\gate.txt
           $gate = $LASTEXITCODE
           foreach ($dll in Get-ChildItem bin\*.dll) {
             $lines = python .github/one-s/isa-gate.py --tool dumpbin --report-only $dll.FullName 2>&1
