@@ -156,6 +156,7 @@
     <ClInclude Include="src\UWPKeyboard.h" />
     <ClInclude Include="src\UWPUtils.h" />
     <ClInclude Include="src\GameVaultWheel.h" />
+    <ClInclude Include="src\Bench.h" />
   </ItemGroup>
   <ItemGroup>
     <AppxManifest Include="Package.appxmanifest">
@@ -169,6 +170,7 @@
     <ClCompile Include="src\UWPSound.cpp" />
     <ClCompile Include="src\UWPFileRedirect.cpp" />
     <ClCompile Include="src\GameVaultWheel.cpp" />
+    <ClCompile Include="src\Bench.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

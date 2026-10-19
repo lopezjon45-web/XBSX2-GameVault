@@ -1,5 +1,6 @@
 #include "pcsx2/PrecompiledHeader.h"
 
+#include "Bench.h"
 #include "UWPKeyboard.h"
 
 #include <windows.h>
@@ -409,11 +410,13 @@ void Host::OnVMStarting()
 
 void Host::OnVMStarted()
 {
+	Bench::OnVMStarted();
 }
 
 void Host::OnVMDestroyed()
 {
 	s_reopen_fullscreen_ui.store(true, std::memory_order_release);
+	Bench::OnVMDestroyed();
 }
 
 void Host::OnVMPaused()
@@ -432,6 +435,7 @@ void Host::OnGameChanged(const std::string& title, const std::string& elf_overri
 
 void Host::OnPerformanceMetricsUpdated()
 {
+	Bench::OnMetricsUpdated();
 }
 
 void Host::OnSaveStateLoading(const std::string_view filename)
@@ -498,6 +502,8 @@ void Host::OpenHostFileSelectorAsync(std::string_view title, bool select_directo
 void Host::PumpMessagesOnCPUThread()
 {
 	WinRTHost::ProcessEventQueue();
+	if (Bench::Active())
+		Bench::OnCPUThreadVSync();
 }
 
 void Host::RunOnCPUThread(std::function<void()> function, bool block /* = false */)
@@ -1015,6 +1021,7 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 			return;
 		}
 
+		Bench::Load();
 
 		if (winrt::try_get_activation_factory<WGI::RawGameController>())
 		{
@@ -1033,6 +1040,14 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 	void OnActivate(const winrt::Windows::ApplicationModel::Core::CoreApplicationView&,
 		const winrt::Windows::ApplicationModel::Activation::IActivatedEventArgs& args)
 	{
+		if (Bench::Active())
+		{
+			if (args.Kind() == Windows::ApplicationModel::Activation::ActivationKind::Protocol)
+				Console.WriteLn("Bench: the launch arguments are ignored, bench.ini decides what runs");
+			Bench::QueueBoot();
+			return;
+		}
+
 		std::stringstream filePath;
 		std::string home;
 		bool fps = false;
