@@ -88,7 +88,15 @@ jobs:
 
       - name: Build XBSX2 (Release, SSE4)
         shell: cmd
-        run: call build_gv.bat /p:PackageCertificateKeyFile=%SIGN_PFX% /p:PackageCertificatePassword=%SIGN_PASSWORD% /p:AppxPackageDir=%GITHUB_WORKSPACE%\AppPackages\
+        run: call build_gv.bat /p:PackageCertificateKeyFile=%SIGN_PFX% /p:PackageCertificatePassword=%SIGN_PASSWORD% /p:AppxPackageDir=%GITHUB_WORKSPACE%\AppPackages\ "/flp:LogFile=%GITHUB_WORKSPACE%\msbuild.log;Verbosity=detailed"
+
+      - name: Compiler arch switches
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force report | Out-Null
+          Select-String -Path msbuild.log -Pattern '/arch:\w+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | ForEach-Object { "$($_.Count) $($_.Name)" } | Tee-Object report\arch.txt
+          Select-String -Path msbuild.log -Pattern 'link\.exe.*' | Select-Object -Last 1 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(1500, $_.Line.Length)) }
 
       - name: Gate on instructions the One S cannot run
         shell: pwsh
