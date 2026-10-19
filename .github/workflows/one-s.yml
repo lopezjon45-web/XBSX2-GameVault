@@ -13,7 +13,7 @@ on:
     inputs:
       version:
         description: Package version. Must be above the AVX2 release it replaces.
-        default: 2.0.9.112
+        default: 2.0.9.113
   push:
     branches: [one-s]
 
@@ -22,7 +22,7 @@ permissions:
 
 env:
   START_COMMIT: dc47f7b34f7be0ca994deedf430bc55d4e467694 # skitzellez/XBSX2-GameVault branch gamevault, where this branch starts
-  PKG_VERSION: ${{ inputs.version || '2.0.9.112' }}
+  PKG_VERSION: ${{ inputs.version || '2.0.9.113' }}
   PATCHES_URL: https://github.com/PCSX2/pcsx2_patches/releases/latest/download
   POWERSHELL_TELEMETRY_OPTOUT: 1
 

@@ -45,6 +45,7 @@ static constexpr u8 cdvdParamLength[16] = { 0, 0, 0, 0, 0, 4, 11, 11, 11, 1, 255
 
 static constexpr size_t NVRAM_SIZE = 1024;
 static u8 s_nvram[NVRAM_SIZE];
+static bool s_nvram_dirty = false;
 
 static constexpr u32 DEFAULT_MECHA_VERSION = 0x00020603;
 static u32 s_mecha_version = 0;
@@ -264,6 +265,8 @@ static void cdvdWriteNVM(const u8* src, int offset, int bytes)
 
 	if (to_write > 0) [[likely]]
 		std::memcpy(&s_nvram[offset], src, to_write);
+
+	s_nvram_dirty = true;
 }
 
 static void cdvdReadConsoleID(u8* id)
@@ -3072,6 +3075,13 @@ static void cdvdWrite16(u8 rt) // SCOMMAND
 				Console.WriteLn("SCMD Unknown %x", rt);
 				break;
 		} // end switch
+
+		// Flush once per finished NVM write command; a config write is several 0x42 commands ended by 0x43.
+		if (s_nvram_dirty && cdvd.CReadWrite != 1)
+		{
+			s_nvram_dirty = false;
+			cdvdSaveNVRAM();
+		}
 
 		//Console.WriteLn("SCMD - 0x%x\n", rt);
 		cdvd.SCMDParamPos = 0;
