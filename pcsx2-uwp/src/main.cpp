@@ -317,6 +317,34 @@ bool WinRTHost::InitializeConfig()
 		}
 	}
 
+	// Game Vault: controller 1 with no buttons at all (the defaults are made before any controller is seen, so a
+	// fresh or reset settings file has none) gets the Xbox controller's standard layout. A player's own mapping,
+	// even a partial one, is left alone. Games saw no input at all: "Controller 1 has no input bindings configured".
+	if (s_settings_interface->GetStringValue("Pad1", "Type", "DualShock2") == "DualShock2" &&
+		s_settings_interface->GetStringValue("Pad1", "Cross").empty() &&
+		s_settings_interface->GetStringValue("Pad1", "Start").empty() &&
+		s_settings_interface->GetStringValue("Pad1", "Up").empty())
+	{
+		static constexpr const char* layout[][2] = {
+			{"Up", "SDL-0/DPadUp"}, {"Right", "SDL-0/DPadRight"}, {"Down", "SDL-0/DPadDown"}, {"Left", "SDL-0/DPadLeft"},
+			{"Triangle", "SDL-0/FaceNorth"}, {"Circle", "SDL-0/FaceEast"}, {"Cross", "SDL-0/FaceSouth"},
+			{"Square", "SDL-0/FaceWest"}, {"Select", "SDL-0/Back"}, {"Start", "SDL-0/Start"},
+			{"L1", "SDL-0/LeftShoulder"}, {"L2", "SDL-0/+LeftTrigger"}, {"R1", "SDL-0/RightShoulder"},
+			{"R2", "SDL-0/+RightTrigger"}, {"L3", "SDL-0/LeftStick"}, {"R3", "SDL-0/RightStick"},
+			{"LUp", "SDL-0/-LeftY"}, {"LRight", "SDL-0/+LeftX"}, {"LDown", "SDL-0/+LeftY"}, {"LLeft", "SDL-0/-LeftX"},
+			{"RUp", "SDL-0/-RightY"}, {"RRight", "SDL-0/+RightX"}, {"RDown", "SDL-0/+RightY"}, {"RLeft", "SDL-0/-RightX"},
+			{"Analog", "SDL-0/Guide"}, {"LargeMotor", "SDL-0/LargeMotor"}, {"SmallMotor", "SDL-0/SmallMotor"}};
+		s_settings_interface->SetStringValue("Pad1", "Type", "DualShock2");
+		for (const auto& b : layout)
+			s_settings_interface->SetStringValue("Pad1", b[0], b[1]);
+		s_settings_interface->SetBoolValue("InputSources", "SDL", true);
+		auto lock = Host::GetSettingsLock();
+		if (s_settings_interface->Save(&error))
+			Console.WriteLn("Game Vault: controller 1 had no buttons, Xbox controller layout set");
+		else
+			Console.ErrorFmt("Game Vault: controller layout not saved: {}", error.GetDescription());
+	}
+
 	const std::string secrets_path(Path::Combine(EmuFolders::Settings, "secrets.ini"));
 	const bool secrets_settings_exists = FileSystem::FileExists(secrets_path.c_str());
 	Console.WriteLn("Loading secrets from %s.", secrets_path.c_str());
@@ -1023,6 +1051,18 @@ struct App : implements<App, IFrameworkViewSource, IFrameworkView>
 					m_launchOnExit = arg.Value();
 				}
 			}
+		}
+
+		// Game Vault: App type "App" (Dev Home) gives only 1 GB, and games run out of memory and close. Started by
+		// Game Vault with that little: straight back to it with "from=lowmem-xbsx2", which says on the TV what to
+		// change.
+		if (std::wstring_view(m_launchOnExit).rfind(L"gamevault:", 0) == 0 &&
+			winrt::Windows::System::MemoryManager::AppMemoryUsageLimit() < (2048ull << 20))
+		{
+			winrt::Windows::System::Launcher::LaunchUriAsync(
+				winrt::Windows::Foundation::Uri(L"gamevault:?from=lowmem-xbsx2"))
+				.Completed([](auto const&, auto) { winrt::Windows::ApplicationModel::Core::CoreApplication::Exit(); });
+			return;
 		}
 
 		std::string gamePath = filePath.str();
