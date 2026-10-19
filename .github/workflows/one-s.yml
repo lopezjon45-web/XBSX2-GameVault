@@ -98,6 +98,24 @@ jobs:
           Select-String -Path msbuild.log -Pattern '/arch:\w+' -AllMatches | ForEach-Object { $_.Matches.Value } | Group-Object | ForEach-Object { "$($_.Count) $($_.Name)" } | Tee-Object report\arch.txt
           Select-String -Path msbuild.log -Pattern 'link\.exe.*' | Select-Object -Last 1 | ForEach-Object { $_.Line.Substring(0, [Math]::Min(1500, $_.Line.Length)) }
 
+      # Uploaded before the gate so a failing gate still leaves the executable, its PDB and dumpbin's symbolized
+      # disassembly to check whether each offender runs only behind a CPU-feature check.
+      - name: Disassembly
+        shell: cmd
+        run: |
+          mkdir disasm
+          dumpbin /NOLOGO /DISASM:NOBYTES bin\pcsx2-uwpx64.exe > disasm\pcsx2-uwpx64.disasm.txt
+
+      - name: Symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbsx2-gamevault-one-s-${{ env.PKG_VERSION }}-symbols
+          path: |
+            bin/pcsx2-uwpx64.exe
+            bin/pcsx2-uwpx64.pdb
+            disasm/pcsx2-uwpx64.disasm.txt
+          if-no-files-found: error
+
       - name: Gate on instructions the One S cannot run
         shell: pwsh
         run: |
@@ -179,11 +197,4 @@ jobs:
           name: xbsx2-gamevault-one-s-${{ env.PKG_VERSION }}
           path: out
           compression-level: 0
-          if-no-files-found: error
-
-      - name: Symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: xbsx2-gamevault-one-s-${{ env.PKG_VERSION }}-symbols
-          path: bin/pcsx2-uwpx64.pdb
           if-no-files-found: error
