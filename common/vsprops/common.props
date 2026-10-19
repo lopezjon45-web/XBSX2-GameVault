@@ -50,7 +50,9 @@
 
       <!-- MSVC automatically adds __AVX__ and __AVX2__ appropriately -->
       <PreprocessorDefinitions Condition="'$(Platform)'=='x64'">_M_X86;__SSE4_1__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='ARM64' Or !$(Configuration.Contains(AVX2))">NotSet</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='ARM64' Or $(Configuration.Contains(Clang))">NotSet</EnableEnhancedInstructionSet>
+      <!-- The One S build: AVX (128-bit on Jaguar, VEX encoding), never AVX2/BMI2/FMA, which Jaguar lacks. -->
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64' And !$(Configuration.Contains(Clang)) And !$(Configuration.Contains(AVX2))">AdvancedVectorExtensions</EnableEnhancedInstructionSet>
       <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64' And $(Configuration.Contains(AVX2))">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <!-- Allow SSE4 intrinsics on non-AVX Clang-cl builds -->
       <AdditionalOptions Condition="'$(Platform)'=='x64' And $(Configuration.Contains(Clang)) And !$(Configuration.Contains(AVX2))"> -march=nehalem %(AdditionalOptions)</AdditionalOptions>
