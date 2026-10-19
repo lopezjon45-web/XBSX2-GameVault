@@ -209,6 +209,8 @@ END_HOTKEY_LIST()
 // settings and controller setup gone), so the settings are kept in the publisher's shared folder
 // (games\xbsx2\PCSX2.ini: outlives a reinstall) and on the games drive (<home>\settings\XBSX2 PCSX2.ini: outlives a
 // reset console), and put back by themselves when XBSX2 starts with no settings of its own.
+static bool s_pad_auto_mapped = false;   // controller 1 got the Xbox layout at this start
+static std::vector<std::string> s_moved_to_home;   // files moved from XBSX2's own storage at this start
 static bool s_settings_were_fresh = false;
 
 static std::string GameVaultSettingsBackup()
@@ -339,6 +341,7 @@ bool WinRTHost::InitializeConfig()
 			s_settings_interface->SetStringValue("Pad1", b[0], b[1]);
 		s_settings_interface->SetBoolValue("InputSources", "SDL", true);
 		auto lock = Host::GetSettingsLock();
+		s_pad_auto_mapped = true;
 		if (s_settings_interface->Save(&error))
 			Console.WriteLn("Game Vault: controller 1 had no buttons, Xbox controller layout set");
 		else
@@ -881,12 +884,32 @@ static void MoveFolderToHome(const std::string& from, const std::string& to)
 		{
 			FileSystem::DeleteFilePath(src.c_str());
 			Console.WriteLn("Game Vault: moved %s to %s", src.c_str(), dst.c_str());
+			s_moved_to_home.push_back(dst);
 		}
 		else
 		{
 			Console.Error("Game Vault: could not move %s to %s", src.c_str(), dst.c_str());
 		}
 	}
+}
+
+// for reports (written once the log on the games drive is open): how controller 1 is set up at this start
+static void LogControllerSetup()
+{
+	if (!s_settings_interface)
+		return;
+	if (s_pad_auto_mapped)
+		Console.WriteLn("Game Vault: controller 1 had no buttons, Xbox controller layout set");
+	for (const std::string& f : s_moved_to_home)   // a BIOS among them is used from now on, before any free one
+		Console.WriteLn("Game Vault: moved from XBSX2's own storage onto the drive: %s", f.c_str());
+	s_moved_to_home.clear();
+	int mapped = 0;
+	for (const char* b : {"Up", "Down", "Left", "Right", "Cross", "Circle", "Square", "Triangle", "Start", "Select",
+			 "L1", "L2", "R1", "R2", "L3", "R3", "LUp", "LDown", "LLeft", "LRight"})
+		mapped += !s_settings_interface->GetStringValue("Pad1", b).empty();
+	Console.WriteLn("Game Vault: controller 1 is %s with %d of 20 buttons and directions mapped (Cross = %s)",
+		s_settings_interface->GetStringValue("Pad1", "Type", "DualShock2").c_str(), mapped,
+		s_settings_interface->GetStringValue("Pad1", "Cross", "none").c_str());
 }
 
 static void UseGameVaultHome(const std::string& home, bool fps)
@@ -950,7 +973,15 @@ static void UseGameVaultHome(const std::string& home, bool fps)
 	{
 		const std::string logs = Path::Combine(home, "logs");
 		FileSystem::CreateDirectoryPath(logs.c_str(), true);
-		Log::SetFileOutputLevel(LOGLEVEL_INFO, Path::Combine(logs, "PS2 (XBSX2) - last session.txt"));
+		// a file still held open (an earlier XBSX2 that never quite closed) cannot be written: the second name then,
+		// else the log silently stayed in XBSX2's own storage and the drive's showed an old session (2026-10-19)
+		if (!Log::SetFileOutputLevel(LOGLEVEL_INFO, Path::Combine(logs, "PS2 (XBSX2) - last session.txt")))
+		{
+			const bool second = Log::SetFileOutputLevel(LOGLEVEL_INFO, Path::Combine(logs, "PS2 (XBSX2) - last session (2).txt"));
+			Console.WriteLn("Game Vault: the drive's log file is in use, %s",
+				second ? "this session's log is 'last session (2)'" : "and so is the second one: this log stays in XBSX2's own storage");
+		}
+		LogControllerSetup();
 	}
 }
 
