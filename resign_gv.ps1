@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Skitzelles - part of Game Vault, https://github.com/skitzellez/xbox-game-vault
 # Turns the bundle build_gv.bat makes (signed with XBSX2's temporary key, publisher CN=SternXD) into
 # "XBSX2 for Game Vault" signed with Game Vault's key (publisher CN=GamerDad), so it updates the installed app.
-#   resign_gv.ps1 <version>   ->  dist\XBSX2-for-GameVault_<version>_AVX2.msixbundle
+#   resign_gv.ps1 <version>   ->  dist\XBSX2-for-GameVault_<version>_SSE4.msixbundle
 param([string]$Ver)
 $ErrorActionPreference = "Stop"
 $sdk = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
@@ -22,7 +22,7 @@ foreach ($m in Get-ChildItem (Join-Path $root "bin") -Filter "pcsx2-uwp_${Ver}_*
     & "$sdk\makeappx.exe" pack /o /d $dir /p $out | Out-Null
     & "$sdk\signtool.exe" sign /fd SHA256 /a /f $pfx /p $pw $out | Out-Null
 }
-$bundle = Join-Path $dist "XBSX2-for-GameVault_${Ver}_AVX2.msixbundle"
+$bundle = Join-Path $dist "XBSX2-for-GameVault_${Ver}_SSE4.msixbundle"
 & "$sdk\makeappx.exe" bundle /o /d "$work\packs" /bv "$Ver" /p $bundle | Out-Null
 & "$sdk\signtool.exe" sign /fd SHA256 /a /f $pfx /p $pw $bundle | Out-Null
 "bundle: $bundle"
