@@ -1,0 +1,181 @@
+# XBSX2 for Game Vault, built for the Xbox One S.
+#
+# The released XBSX2-for-GameVault_<ver>_AVX2.msixbundle is the solution's "Release AVX2" configuration
+# (/arch:AVX2 everywhere: BMI2, FMA3, AVX2). The One S CPU is an AMD Jaguar (SSE4.2, AVX, BMI1, F16C, MOVBE) and
+# stops the app at the first BMI2 or AVX2 instruction with STATUS_ILLEGAL_INSTRUCTION. This job builds the
+# same tree in the solution's "Release" configuration, PCSX2's SSE4.1 baseline, the one XboxEmulationHub ships
+# as XBSX2_<ver>_SSE4.msixbundle. The package keeps the identity Game Vault looks for and gets a version above
+# the AVX2 release so it installs over it. Nothing in the emulator's source changes.
+name: one-s
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version. Must be above the AVX2 release it replaces.
+        default: 2.0.9.112
+  push:
+    branches: [one-s]
+
+permissions:
+  contents: read
+
+env:
+  START_COMMIT: dc47f7b34f7be0ca994deedf430bc55d4e467694 # skitzellez/XBSX2-GameVault branch gamevault, where this branch starts
+  PKG_VERSION: ${{ inputs.version || '2.0.9.112' }}
+  PATCHES_URL: https://github.com/PCSX2/pcsx2_patches/releases/latest/download
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package version
+        shell: pwsh
+        run: |
+          $path = "pcsx2-uwp\Package.appxmanifest"
+          $xml = [xml](Get-Content $path)
+          $was = [version]$xml.Package.Identity.Version
+          $now = [version]$env:PKG_VERSION
+          if ($now -le $was) { throw "PKG_VERSION $now is not above the AVX2 release's $was" }
+          $text = Get-Content $path -Raw
+          $text = $text -replace '(<Identity[\s\S]*?Version=")[^"]+(")', "`${1}$now`$2"
+          Set-Content $path $text -NoNewline -Encoding UTF8
+          $xml = [xml](Get-Content $path)
+          Write-Output "identity $($xml.Package.Identity.Name) $($xml.Package.Identity.Publisher) $($xml.Package.Identity.Version) (was $was)"
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Patches
+        shell: cmd
+        run: |
+          cd bin\resources
+          aria2c -Z "%PATCHES_URL%/patches.zip"
+
+      - name: Dependencies cache
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: deps-one-s-${{ hashFiles('.github/workflows/scripts/uwp/build-dependencies-uwp.bat', '.github/workflows/scripts/common/*.patch') }}
+
+      - name: Build dependencies
+        if: steps.deps.outputs.cache-hit != 'true'
+        env:
+          DEBUG: 0
+        run: .github/workflows/scripts/uwp/build-dependencies-uwp.bat
+
+      # A throwaway certificate with the package's publisher as subject. The console runs in Dev Mode and accepts
+      # any signature; the key is deleted at the end of the job and never leaves the runner.
+      - name: Signing certificate
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=GamerDad" -KeyUsage DigitalSignature `
+            -KeyAlgorithm RSA -KeyLength 2048 -CertStoreLocation Cert:\CurrentUser\My `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}") -NotAfter (Get-Date).AddYears(10)
+          $password = [guid]::NewGuid().ToString()
+          $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
+          Write-Output "::add-mask::$password"
+          "SIGN_PFX=$pfx" >> $env:GITHUB_ENV
+          "SIGN_PASSWORD=$password" >> $env:GITHUB_ENV
+          "SIGN_CERT=$($cert.PSPath)" >> $env:GITHUB_ENV
+
+      - name: Build XBSX2 (Release, SSE4)
+        shell: cmd
+        run: call build_gv.bat /p:PackageCertificateKeyFile=%SIGN_PFX% /p:PackageCertificatePassword=%SIGN_PASSWORD% /p:AppxPackageDir=%GITHUB_WORKSPACE%\AppPackages\
+
+      - name: Gate on instructions the One S cannot run
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force report | Out-Null
+          python .github/one-s/isa-gate.py --tool dumpbin --verbose bin\pcsx2-uwpx64.exe 2>&1 | Tee-Object -FilePath report\gate.txt
+          $gate = $LASTEXITCODE
+          foreach ($dll in Get-ChildItem bin\*.dll) {
+            $lines = python .github/one-s/isa-gate.py --tool dumpbin --report-only $dll.FullName 2>&1
+            ($lines | Select-Object -First 7) -join "  " | Tee-Object -FilePath report\dlls.txt -Append
+          }
+          if ($gate -ne 0) { throw "the executable has instructions the One S cannot run (see report/gate.txt)" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          $built = Get-ChildItem -Recurse -Filter *.msixbundle AppPackages | Select-Object -First 1
+          if (-not $built) { throw "no .msixbundle under AppPackages" }
+          $bundle = "out\XBSX2-for-GameVault_${env:PKG_VERSION}_SSE4.msixbundle"
+          Copy-Item $built.FullName $bundle
+          $sig = Get-AuthenticodeSignature $bundle
+          Write-Output "signature $($sig.Status) by $($sig.SignerCertificate.Subject)"
+          if ($sig.SignerCertificate.Subject -ne "CN=GamerDad") { throw "bundle is not signed by CN=GamerDad" }
+          # The identity Game Vault detects, read back from the package itself.
+          $work = Join-Path $env:RUNNER_TEMP "inspect"
+          Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item $bundle "$env:RUNNER_TEMP\bundle.zip"
+          Expand-Archive "$env:RUNNER_TEMP\bundle.zip" $work
+          $msix = Get-ChildItem $work -Filter "*x64*.msix" | Select-Object -First 1
+          Copy-Item $msix.FullName "$env:RUNNER_TEMP\msix.zip"
+          Expand-Archive "$env:RUNNER_TEMP\msix.zip" "$work\x64"
+          $man = [xml](Get-Content "$work\x64\AppxManifest.xml")
+          $id = $man.Package.Identity
+          $exe = $man.Package.Applications.Application.Executable
+          Write-Output "package identity Name=$($id.Name) Publisher=$($id.Publisher) Version=$($id.Version) Executable=$exe"
+          if ($id.Name -ne "GamerDad.XBSX2ForGameVault" -or $id.Publisher -ne "CN=GamerDad" -or $id.Version -ne $env:PKG_VERSION) { throw "unexpected identity" }
+          if (-not (Test-Path "$work\x64\$exe")) { throw "$exe is not in the package" }
+          Get-ChildItem "$work\x64" -File | Where-Object { $_.Extension -in ".exe", ".dll" } | ForEach-Object { "$($_.Name) $($_.Length)" } | Tee-Object -FilePath report\files.txt
+          $hash = (Get-FileHash $bundle -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $bundle -Leaf)" | Tee-Object -FilePath report\bundle.sha256
+          @(
+            "# XBSX2 for Game Vault on the Xbox One S, package $env:PKG_VERSION"
+            ""
+            "- start commit: $env:START_COMMIT (skitzellez/XBSX2-GameVault, branch gamevault)"
+            "- built commit: $env:GITHUB_SHA (branch $env:GITHUB_REF_NAME), run $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            "- configuration: Release (SSE4.1 baseline), PlatformToolset v143, built by build_gv.bat"
+            "- package identity: Name=$($id.Name) Publisher=$($id.Publisher) Version=$($id.Version)"
+            "- signed by: $($sig.SignerCertificate.Subject) (self-signed, key discarded by the job)"
+            "- bundle SHA-256: $hash"
+            ""
+            "## Instruction gate on $exe (dumpbin, symbols from the build's PDB)"
+            ""
+            (Get-Content report\gate.txt | Where-Object { $_ -notmatch '^\s+(BMI2|FMA3|FMA4|AVX2|AVX512)\s+[0-9A-Fa-f]+ ' } | ForEach-Object { "    $_" })
+            ""
+            "## DLLs shipped in the package (counts only, no symbols)"
+            ""
+            (Get-Content report\dlls.txt | ForEach-Object { "    $_" })
+          ) | Set-Content out\build-report.md
+          Copy-Item report\gate.txt, report\dlls.txt, report\files.txt, report\bundle.sha256 out\
+          Get-Content out\build-report.md
+
+      - name: Discard the signing key
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:SIGN_PFX -and (Test-Path $env:SIGN_PFX)) { Remove-Item $env:SIGN_PFX }
+          if ($env:SIGN_CERT -and (Test-Path $env:SIGN_CERT)) { Remove-Item $env:SIGN_CERT }
+
+      - name: Gate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-report
+          path: report
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xbsx2-gamevault-one-s-${{ env.PKG_VERSION }}
+          path: out
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbsx2-gamevault-one-s-${{ env.PKG_VERSION }}-symbols
+          path: bin/pcsx2-uwpx64.pdb
+          if-no-files-found: error
