@@ -7,6 +7,9 @@
 #include "SIO/Pad/Pad.h"
 #include "SIO/Sio.h"
 #include "USB/USB.h"
+#if defined(WINRT_XBOX)
+#include "../pcsx2-uwp/src/GameVaultWheel.h"
+#endif
 #include "VMManager.h"
 #include "LayeredSettingsInterface.h"
 
@@ -1722,6 +1725,10 @@ void InputManager::PollSources()
 		if (s_input_sources[i]->IsInitialized())
 			s_input_sources[i]->PollEvents();
 	}
+
+#if defined(WINRT_XBOX)
+	GameVaultWheel::Poll();   // Xbox racing wheels -> USB port 1 (pcsx2-uwp/src/GameVaultWheel.cpp)
+#endif
 
 	GenerateRelativeMouseEvents();
 

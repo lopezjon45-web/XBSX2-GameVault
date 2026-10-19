@@ -9,6 +9,9 @@
 #include "USB/usb-pad/usb-pad-sdl-ff.h"
 #endif
 #include "USB/USB.h"
+#if defined(WINRT_XBOX)
+#include "../pcsx2-uwp/src/GameVaultWheel.h"
+#endif
 #include "Host.h"
 #include "StateWrapper.h"
 
@@ -610,6 +613,11 @@ namespace usb_pad
 
 		mFFdev.reset();
 		mFFdev = SDLFFDevice::Create(mFFdevName);
+#else
+		// Game Vault: an Xbox racing wheel's motor (pcsx2-uwp/src/GameVaultWheel.cpp)
+		mFFdev.reset();
+		if (mFFdevName == GameVaultWheel::kFFDeviceName)
+			mFFdev = GameVaultWheel::CreateFFDevice();
 #endif
 	}
 
