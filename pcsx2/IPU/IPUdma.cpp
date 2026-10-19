@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "BenchProbe.h"
 #include "Common.h"
 #include "IPU/IPU.h"
 #include "IPU/IPUdma.h"
@@ -273,6 +274,7 @@ void ipuCMDProcess()
 
 void ipu0Interrupt()
 {
+	BenchProbe::Scope s(BenchProbe::IPU_DMA);
 	IPU_LOG("ipu0Interrupt: %llx", cpuRegs.cycle);
 
 	if(ipu0ch.qwc > 0)
@@ -289,6 +291,7 @@ void ipu0Interrupt()
 
 __fi void ipu1Interrupt()
 {
+	BenchProbe::Scope s(BenchProbe::IPU_DMA);
 	IPU_LOG("ipu1Interrupt %llx:", cpuRegs.cycle);
 
 	if(!IPU1Status.DMAFinished || IPU1Status.InProgress)  //Sanity Check

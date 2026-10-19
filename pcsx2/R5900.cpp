@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "BenchProbe.h"
 #include "Common.h"
 
 #include "common/Path.h"
@@ -389,17 +390,21 @@ __fi void _cpuEventTest_Shared()
 	if (EEsCycle > 0)
 		iopEventAction = true;
 
-	if (iopEventAction)
 	{
-		//if( EEsCycle < -450 )
-		//	Console.WriteLn( " IOP ahead by: %d cycles", -EEsCycle );
+		// the event test below runs IOP interrupt handlers too, so it is the IOP's time as much as the block
+		BenchProbe::Scope s(BenchProbe::IOP);
+		if (iopEventAction)
+		{
+			//if( EEsCycle < -450 )
+			//	Console.WriteLn( " IOP ahead by: %d cycles", -EEsCycle );
 
-		EEsCycle = psxCpu->ExecuteBlock(EEsCycle);
+			EEsCycle = psxCpu->ExecuteBlock(EEsCycle);
 
-		iopEventAction = false;
+			iopEventAction = false;
+		}
+
+		iopEventTest();
 	}
-
-	iopEventTest();
 
 	if (cpuTestCycle(nextStartCounter, nextDeltaCounter))
 	{

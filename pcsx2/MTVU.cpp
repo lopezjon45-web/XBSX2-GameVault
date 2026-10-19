@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "BenchProbe.h"
 #include "Common.h"
 #include "Gif_Unit.h"
 #include "MTVU.h"
@@ -434,6 +435,7 @@ bool VU_Thread::IsDone()
 
 void VU_Thread::WaitVU()
 {
+	BenchProbe::Scope s(BenchProbe::VU1_WAIT);
 	MTVU_LOG("MTVU - WaitVU!");
 	semaEvent.WaitForEmpty();
 }

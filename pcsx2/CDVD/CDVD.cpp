@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "BenchProbe.h"
 #include "CDVD/CDVD.h"
 #include "CDVD/Ps1CD.h"
 #include "CDVD/CDVD_internal.h"
@@ -1103,6 +1104,7 @@ static void mechaDecryptBytes(u32 madr, int size)
 
 int cdvdReadSector()
 {
+	BenchProbe::Scope s(BenchProbe::CDVD);
 	s32 bcr;
 
 	CDVD_LOG("SECTOR %d (BCR %x;%x)", cdvd.CurrentSector, HW_DMA3_BCR_H16, HW_DMA3_BCR_L16);
@@ -1338,6 +1340,7 @@ __fi void cdvdReadInterrupt()
 	{
 		if (cdvd.ReadErr == 0)
 		{
+			BenchProbe::Scope s(BenchProbe::CDVD);
 			while ((cdvd.ReadErr = DoCDVDgetBuffer(&cdr.Transfer[0])), cdvd.ReadErr == -2)
 			{
 				// not finished yet ... block on the read until it finishes.

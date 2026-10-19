@@ -1296,6 +1296,9 @@
     <ClCompile Include="Pcsx2Config.cpp">
       <Filter>Misc</Filter>
     </ClCompile>
+    <ClCompile Include="BenchProbe.cpp">
+      <Filter>Misc</Filter>
+    </ClCompile>
     <ClCompile Include="BuildVersion.cpp">
       <Filter>Misc</Filter>
     </ClCompile>
@@ -2262,6 +2265,9 @@
     </ClInclude>
     <ClInclude Include="ps2\pgif.h">
       <Filter>System\Ps2\Iop</Filter>
+    </ClInclude>
+    <ClInclude Include="BenchProbe.h">
+      <Filter>Misc</Filter>
     </ClInclude>
     <ClInclude Include="BuildVersion.h">
       <Filter>Misc</Filter>

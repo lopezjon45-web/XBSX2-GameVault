@@ -4,6 +4,7 @@
 #include <time.h>
 #include <cmath>
 
+#include "BenchProbe.h"
 #include "Common.h"
 #include "R3000A.h"
 #include "Counters.h"
@@ -488,7 +489,10 @@ static __fi void VSyncStart(u64 sCycle)
 {
 	// End-of-frame tasks.
 	DoFMVSwitch();
-	VMManager::Internal::VSyncOnCPUThread();
+	{
+		BenchProbe::Scope s(BenchProbe::VSYNC_POLL);
+		VMManager::Internal::VSyncOnCPUThread();
+	}
 
 	// Don't bother throttling if we're going to pause.
 	if (!VMManager::Internal::IsExecutionInterrupted())
@@ -497,7 +501,10 @@ static __fi void VSyncStart(u64 sCycle)
 	gsPostVsyncStart(); // MUST be after framelimit; doing so before causes funk with frame times!
 
 	// Poll input after MTGS frame push, just in case it has to stall to catch up.
-	VMManager::Internal::PollInputOnCPUThread();
+	{
+		BenchProbe::Scope s(BenchProbe::VSYNC_POLL);
+		VMManager::Internal::PollInputOnCPUThread();
+	}
 
 	EECNT_LOG("    ================  EE COUNTER VSYNC START (frame: %d)  ================", g_FrameCount);
 

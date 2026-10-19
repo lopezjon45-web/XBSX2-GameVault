@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "BenchProbe.h"
 #include "GS.h"
 #include "Gif_Unit.h"
 #include "MTGS.h"
@@ -612,6 +613,7 @@ void MTGS::MainLoop()
 // If isMTVU, then this implies this function is being called from the MTVU thread...
 void MTGS::WaitGS(bool syncRegs, bool weakWait, bool isMTVU)
 {
+	BenchProbe::Scope s(BenchProbe::GS_WAIT);
 	pxAssertMsg(IsOpen(), "MTGS Warning!  WaitGS issued on a closed thread.");
 	if (!IsOpen()) [[unlikely]]
 		return;
@@ -704,6 +706,7 @@ void MTGS::SendDataPacket()
 
 void MTGS::GenericStall(uint size)
 {
+	BenchProbe::Scope s(BenchProbe::GS_STALL);
 	// Note on volatiles: m_WritePos is not modified by the GS thread, so there's no need
 	// to use volatile reads here.  We do cache it though, since we know it never changes,
 	// except for calls to RingbufferRestert() -- handled below.

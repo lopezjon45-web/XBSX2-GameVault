@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0+
 
 #include "Achievements.h"
+#include "BenchProbe.h"
 #include "BuildVersion.h"
 #include "CDVD/CDVD.h"
 #include "CDVD/IsoReader.h"
@@ -2286,6 +2287,7 @@ void VMManager::ResetFrameLimiter()
 
 void VMManager::Internal::Throttle()
 {
+	BenchProbe::Scope s(BenchProbe::THROTTLE);
 	if (s_target_speed == 0.0f || s_use_vsync_for_timing)
 		return;
 

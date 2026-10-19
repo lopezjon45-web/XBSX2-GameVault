@@ -26,6 +26,7 @@
 #include "common/Path.h"
 #include "common/Timer.h"
 
+#include "pcsx2/BenchProbe.h"
 #include "pcsx2/CDVD/CDVDcommon.h"
 #include "pcsx2/Config.h"
 #include "pcsx2/Host.h"
@@ -72,6 +73,7 @@ namespace
 		float warmup_seconds = 25.0f;
 		float sample_seconds = 60.0f;
 		std::vector<Press> presses;
+		bool probes = false; // the EE-thread time probes (BenchProbe): a profile run, not a metric run
 	};
 
 	constexpr std::pair<const char*, u32> kButtons[] = {
@@ -117,6 +119,7 @@ namespace
 	struct Samples
 	{
 		std::vector<float> speed, fps, ee_ms, gs_ms;
+		std::vector<float> probe_ms[BenchProbe::COUNT]; // each probe's own ms per vsync
 		u64 first_frame = 0, last_frame = 0;
 		float first_t = 0.0f, last_t = 0.0f;
 	};
@@ -133,6 +136,8 @@ static std::FILE* s_log = nullptr;
 static Samples s_samples;
 static u32 s_errors = 0;
 static bool s_summary_written = false;
+static BenchProbe::Totals s_probe_prev[BenchProbe::COUNT] = {}; // at the previous update (OnVMStarted for the first)
+static u64 s_frame_prev = 0;
 
 static void WriteLine(const std::string& line)
 {
@@ -152,6 +157,14 @@ static float Median(std::vector<float> v)
 	return (n % 2) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) * 0.5f;
 }
 
+// the waits and the decoders get a calls-per-vsync column too; the rest run once per vsync
+static bool LogsCalls(u32 id)
+{
+	// qualified: the global CDVD (the drive API pointer) makes a bare CDVD ambiguous here
+	return id == BenchProbe::IPU || id == BenchProbe::SPU2 || id == BenchProbe::IOP || id == BenchProbe::CDVD ||
+		   id == BenchProbe::GS_WAIT || id == BenchProbe::VU1_WAIT;
+}
+
 // once, whichever way the run ends: the window ran out, the boot failed, or the VM stopped early
 static void WriteSummary()
 {
@@ -167,10 +180,13 @@ static void WriteSummary()
 		min_speed = (i == 0) ? s.speed[i] : std::min(min_speed, s.speed[i]);
 		max_speed = (i == 0) ? s.speed[i] : std::max(max_speed, s.speed[i]);
 	}
-	WriteLine(fmt::format("# summary samples={} errors={} frames={} seconds={:.1f} median_speed={:.1f} median_fps={:.2f} "
+	std::string line = fmt::format("# summary samples={} errors={} frames={} seconds={:.1f} median_speed={:.1f} median_fps={:.2f} "
 					"median_ee_ms={:.2f} median_gs_ms={:.2f} min_speed={:.1f} max_speed={:.1f}",
 		s.speed.size(), s_errors, s.last_frame - s.first_frame, s.last_t - s.first_t, Median(s.speed), Median(s.fps),
-		Median(s.ee_ms), Median(s.gs_ms), min_speed, max_speed));
+		Median(s.ee_ms), Median(s.gs_ms), min_speed, max_speed);
+	for (u32 i = 0; i < BenchProbe::COUNT; i++)
+		line += fmt::format(" median_{}={:.2f}", BenchProbe::Names[i], Median(s.probe_ms[i]));
+	WriteLine(line);
 }
 
 // Every line is flushed, so nothing is lost if the clean exit never comes: ten seconds after it was asked
@@ -216,6 +232,7 @@ bool Bench::Load()
 	s_config.warmup_seconds = ini.GetFloatValue("Bench", "WarmupSeconds", 25.0f);
 	s_config.sample_seconds = ini.GetFloatValue("Bench", "SampleSeconds", 60.0f);
 	s_config.presses = ParsePresses(ini.GetStringValue("Bench", "Press"));
+	s_config.probes = ini.GetBoolValue("Bench", "Probes", false);
 
 	const std::string log_path = Path::Combine(EmuFolders::DataRoot, "bench.log");
 	s_log = FileSystem::OpenCFile(log_path.c_str(), "wb");
@@ -228,11 +245,11 @@ bool Bench::Load()
 	const auto version = winrt::Windows::ApplicationModel::Package::Current().Id().Version();
 	DWORD_PTR process_mask = 0, system_mask = 0;
 	GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
-	WriteLine(fmt::format("# xbsx2 bench build={}.{}.{}.{} game={} state={} slot={} warmup={:.1f} sample={:.1f} presses={} affinity=0x{:x} system_affinity=0x{:x}",
+	WriteLine(fmt::format("# xbsx2 bench build={}.{}.{}.{} game={} state={} slot={} warmup={:.1f} sample={:.1f} presses={} probes={} affinity=0x{:x} system_affinity=0x{:x}",
 		version.Major, version.Minor, version.Build, version.Revision, s_config.game,
 		s_config.save_state.empty() ? std::string("none") : s_config.save_state,
 		s_config.state_slot ? std::to_string(*s_config.state_slot) : std::string("none"),
-		s_config.warmup_seconds, s_config.sample_seconds, s_config.presses.size(), static_cast<u64>(process_mask), static_cast<u64>(system_mask)));
+		s_config.warmup_seconds, s_config.sample_seconds, s_config.presses.size(), s_config.probes ? 1 : 0, static_cast<u64>(process_mask), static_cast<u64>(system_mask)));
 
 	s_phase.store(Phase::Booting);
 	Console.WriteLn("Bench: %s, %.0f s warm-up then %.0f s of samples, log in %s", s_config.game.c_str(),
@@ -282,6 +299,8 @@ void Bench::OnVMStarted()
 	if (s_phase.load() != Phase::Booting)
 		return;
 	s_clock_start.store(Common::Timer::GetCurrentValue());
+	BenchProbe::Snapshot(s_probe_prev);
+	s_frame_prev = PerformanceMetrics::GetFrameNumber();
 	s_phase.store(Phase::WarmingUp);
 }
 
@@ -309,11 +328,32 @@ void Bench::OnMetricsUpdated()
 	const float ee_ms = static_cast<float>(PerformanceMetrics::GetCPUThreadAverageTime());
 	const float gs_ms = PerformanceMetrics::GetGSThreadAverageTime();
 	const u64 frame = PerformanceMetrics::GetFrameNumber();
-	WriteLine(fmt::format("t={:.1f} phase={} speed={:.1f} fps={:.2f} ifps={:.2f} ee_ms={:.2f} ee_pct={:.1f} gs_ms={:.2f} gs_pct={:.1f} "
+	std::string line = fmt::format("t={:.1f} phase={} speed={:.1f} fps={:.2f} ifps={:.2f} ee_ms={:.2f} ee_pct={:.1f} gs_ms={:.2f} gs_pct={:.1f} "
 					"vu_ms={:.2f} frame={} ee_cpu={} gs_cpu={}",
 		t, sampling ? "sample" : "warmup", speed, fps, PerformanceMetrics::GetInternalFPS(), ee_ms,
 		PerformanceMetrics::GetCPUThreadUsage(), gs_ms, PerformanceMetrics::GetGSThreadUsage(),
-		PerformanceMetrics::GetVUThreadAverageTime(), frame, s_ee_cpu.load(), GetCurrentProcessorNumber()));
+		PerformanceMetrics::GetVUThreadAverageTime(), frame, s_ee_cpu.load(), GetCurrentProcessorNumber());
+
+	BenchProbe::Totals probes[BenchProbe::COUNT];
+	BenchProbe::Snapshot(probes);
+	const u64 vsyncs = frame - s_frame_prev;
+	s_frame_prev = frame;
+	float probe_ms[BenchProbe::COUNT];
+	for (u32 i = 0; i < BenchProbe::COUNT; i++)
+	{
+		const BenchProbe::Totals& now = probes[i];
+		const BenchProbe::Totals& prev = s_probe_prev[i];
+		// signed: a child closed inside a still-open parent has been charged to the parent's child_ticks but not
+		// yet to its ticks, so a snapshot taken then can briefly show the parent below zero
+		const double own_ms = Common::Timer::ConvertValueToMilliseconds(now.ticks - prev.ticks) -
+			Common::Timer::ConvertValueToMilliseconds(now.child_ticks - prev.child_ticks);
+		probe_ms[i] = (vsyncs == 0) ? 0.0f : static_cast<float>(own_ms / vsyncs);
+		line += fmt::format(" {}={:.2f}", BenchProbe::Names[i], probe_ms[i]);
+		if (LogsCalls(i))
+			line += fmt::format(" {}_n={}", BenchProbe::Names[i], (vsyncs == 0) ? 0 : (now.calls - prev.calls) / vsyncs);
+		s_probe_prev[i] = now;
+	}
+	WriteLine(line);
 	if (!sampling)
 		return;
 
@@ -328,6 +368,8 @@ void Bench::OnMetricsUpdated()
 	s_samples.fps.push_back(fps);
 	s_samples.ee_ms.push_back(ee_ms);
 	s_samples.gs_ms.push_back(gs_ms);
+	for (u32 i = 0; i < BenchProbe::COUNT; i++)
+		s_samples.probe_ms[i].push_back(probe_ms[i]);
 	s_samples.last_frame = frame;
 	s_samples.last_t = t;
 }
@@ -365,6 +407,12 @@ void Bench::OnVMDestroyed()
 
 void Bench::OnCPUThreadVSync()
 {
+	static bool probes_enabled = false;
+	if (s_config.probes && !probes_enabled)
+	{
+		probes_enabled = true;
+		BenchProbe::EnableThisThread();
+	}
 	s_ee_cpu.store(GetCurrentProcessorNumber());
 
 	const Phase phase = s_phase.load();
