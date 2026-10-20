@@ -12,6 +12,7 @@
  *   Slot=1                                  (optional: a save state slot instead)
  *   WarmupSeconds=25
  *   SampleSeconds=60
+ *   Press=20:start,24:cross                 (optional: pad-1 presses at seconds after the VM started)
  */
 #include "pcsx2/PrecompiledHeader.h"
 
@@ -33,6 +34,8 @@
 #include "pcsx2/Input/InputManager.h"
 #include "pcsx2/MTGS.h"
 #include "pcsx2/PerformanceMetrics.h"
+#include "pcsx2/SIO/Pad/Pad.h"
+#include "pcsx2/SIO/Pad/PadDualshock2.h"
 #include "pcsx2/VMManager.h"
 
 #include "fmt/format.h"
@@ -40,13 +43,25 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
 {
+	// one scripted pad-1 button press, held for a quarter second, at a time after the VM started (bench mode only)
+	struct Press
+	{
+		float at;
+		u32 button;
+		const char* name;
+		bool down = false;
+		bool done = false;
+	};
+
 	struct Config
 	{
 		std::string game;
@@ -54,7 +69,38 @@ namespace
 		std::optional<s32> state_slot;
 		float warmup_seconds = 25.0f;
 		float sample_seconds = 60.0f;
+		std::vector<Press> presses;
 	};
+
+	constexpr std::pair<const char*, u32> kButtons[] = {
+		{"up", PadDualshock2::PAD_UP}, {"right", PadDualshock2::PAD_RIGHT}, {"down", PadDualshock2::PAD_DOWN},
+		{"left", PadDualshock2::PAD_LEFT}, {"triangle", PadDualshock2::PAD_TRIANGLE}, {"circle", PadDualshock2::PAD_CIRCLE},
+		{"cross", PadDualshock2::PAD_CROSS}, {"square", PadDualshock2::PAD_SQUARE}, {"select", PadDualshock2::PAD_SELECT},
+		{"start", PadDualshock2::PAD_START}, {"l1", PadDualshock2::PAD_L1}, {"l2", PadDualshock2::PAD_L2},
+		{"r1", PadDualshock2::PAD_R1}, {"r2", PadDualshock2::PAD_R2}};
+
+	// "20:start,24:cross": seconds after the VM started, then the button; unknown entries are skipped
+	std::vector<Press> ParsePresses(const std::string& text)
+	{
+		std::vector<Press> out;
+		size_t pos = 0;
+		while (pos <= text.size())
+		{
+			const size_t comma = text.find(',', pos);
+			const std::string item = text.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+			pos = (comma == std::string::npos) ? text.size() + 1 : comma + 1;
+			const size_t colon = item.find(':');
+			if (colon == std::string::npos)
+				continue;
+			const std::string name = item.substr(colon + 1);
+			for (const auto& [button_name, button] : kButtons)
+			{
+				if (name == button_name)
+					out.push_back(Press{static_cast<float>(std::atof(item.c_str())), button, button_name});
+			}
+		}
+		return out;
+	}
 
 	enum class Phase
 	{
@@ -151,6 +197,7 @@ bool Bench::Load()
 		s_config.state_slot = slot;
 	s_config.warmup_seconds = ini.GetFloatValue("Bench", "WarmupSeconds", 25.0f);
 	s_config.sample_seconds = ini.GetFloatValue("Bench", "SampleSeconds", 60.0f);
+	s_config.presses = ParsePresses(ini.GetStringValue("Bench", "Press"));
 
 	const std::string log_path = Path::Combine(EmuFolders::DataRoot, "bench.log");
 	s_log = FileSystem::OpenCFile(log_path.c_str(), "wb");
@@ -163,11 +210,11 @@ bool Bench::Load()
 	const auto version = winrt::Windows::ApplicationModel::Package::Current().Id().Version();
 	DWORD_PTR process_mask = 0, system_mask = 0;
 	GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
-	WriteLine(fmt::format("# xbsx2 bench build={}.{}.{}.{} game={} state={} slot={} warmup={:.1f} sample={:.1f} affinity=0x{:x} system_affinity=0x{:x}",
+	WriteLine(fmt::format("# xbsx2 bench build={}.{}.{}.{} game={} state={} slot={} warmup={:.1f} sample={:.1f} presses={} affinity=0x{:x} system_affinity=0x{:x}",
 		version.Major, version.Minor, version.Build, version.Revision, s_config.game,
 		s_config.save_state.empty() ? std::string("none") : s_config.save_state,
 		s_config.state_slot ? std::to_string(*s_config.state_slot) : std::string("none"),
-		s_config.warmup_seconds, s_config.sample_seconds, static_cast<u64>(process_mask), static_cast<u64>(system_mask)));
+		s_config.warmup_seconds, s_config.sample_seconds, s_config.presses.size(), static_cast<u64>(process_mask), static_cast<u64>(system_mask)));
 
 	s_phase.store(Phase::Booting);
 	Console.WriteLn("Bench: %s, %.0f s warm-up then %.0f s of samples, log in %s", s_config.game.c_str(),
@@ -297,4 +344,27 @@ void Bench::OnVMDestroyed()
 void Bench::OnCPUThreadVSync()
 {
 	s_ee_cpu.store(GetCurrentProcessorNumber());
+
+	const Phase phase = s_phase.load();
+	if (phase != Phase::WarmingUp && phase != Phase::Sampling)
+		return;
+	const float t = static_cast<float>(Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - s_clock_start.load()));
+	for (Press& press : s_config.presses)
+	{
+		if (press.done || t < press.at)
+			continue;
+		if (!press.down)
+		{
+			Pad::SetControllerState(0, press.button, 1.0f);
+			press.down = true;
+			std::lock_guard<std::mutex> lock(s_lock);
+			WriteLine(fmt::format("# press {} at t={:.1f}", press.name, t));
+		}
+		else if (t >= press.at + 0.25f)
+		{
+			Pad::SetControllerState(0, press.button, 0.0f);
+			press.down = false;
+			press.done = true;
+		}
+	}
 }
