@@ -42,11 +42,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -169,9 +171,25 @@ static void WriteSummary()
 					"median_ee_ms={:.2f} median_gs_ms={:.2f} min_speed={:.1f} max_speed={:.1f}",
 		s.speed.size(), s_errors, s.last_frame - s.first_frame, s.last_t - s.first_t, Median(s.speed), Median(s.fps),
 		Median(s.ee_ms), Median(s.gs_ms), min_speed, max_speed));
-	if (s_log)
-		std::fclose(s_log);
-	s_log = nullptr;
+}
+
+// Every line is flushed, so nothing is lost if the clean exit never comes: ten seconds after it was asked
+// for, the run ends the process itself and says so in the log (the emulog is closed first so its tail survives).
+static void ExitWithWatchdog()
+{
+	Host::RequestExitApplication(false);
+	std::thread([]() {
+		std::this_thread::sleep_for(std::chrono::seconds(10));
+		{
+			std::lock_guard<std::mutex> lock(s_lock);
+			WriteLine("# exit forced: the app had not exited 10 s after the request");
+			if (s_log)
+				std::fclose(s_log);
+			s_log = nullptr;
+		}
+		Log::SetFileOutputLevel(LOGLEVEL_NONE, std::string());
+		TerminateProcess(GetCurrentProcess(), 0);
+	}).detach();
 }
 
 bool Bench::Load()
@@ -249,7 +267,7 @@ void Bench::QueueBoot()
 			s_errors++;
 			WriteLine("# error boot failed");
 			WriteSummary();
-			Host::RequestExitApplication(false);
+			ExitWithWatchdog();
 			return;
 		}
 
@@ -338,7 +356,11 @@ void Bench::OnVMDestroyed()
 		case Phase::Done:
 			break;
 	}
-	Host::RequestExitApplication(false);
+	{
+		std::lock_guard<std::mutex> lock(s_lock);
+		WriteLine("# exit requested");
+	}
+	ExitWithWatchdog();
 }
 
 void Bench::OnCPUThreadVSync()
