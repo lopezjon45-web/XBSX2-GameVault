@@ -139,6 +139,10 @@ jobs:
             # Picks the AVX2 bitmap strategy (and calls _Make_bitmap) only when the __isa_enabled AVX2 bit is set.
             '--allow', '^.anonymous namespace.::__std_find_first_of::_Dispatch_pos_sse_1_2<unsigned char>$'
             '--allow', '^.anonymous namespace.::__std_find_meow_of_bitmap_details::_Make_bitmap<unsigned char>$'
+            # Not code: in run 39346904466 the bytes after this function's ret and nop pad decode as an EVEX
+            # vpunpckldq with xmm19 (which this compiler never emits) followed by "add byte ptr gs:[rdx-2Fh],ah"
+            # four times over, a data table that whole-program optimization placed next to the function.
+            '--allow', '^rc_condition_determine_comparator$'
           )
           python .github/one-s/isa-gate.py --tool dumpbin --verbose @allow bin\pcsx2-uwpx64.exe 2>&1 | Tee-Object -FilePath report\gate.txt
           $gate = $LASTEXITCODE
